@@ -148,6 +148,7 @@ bool doATOM(GccInterpreter& gcc, int* params) {
 }
 
 bool doCONS(GccInterpreter& gcc, int* params) {
+  gcc.gc.tryCollect();
   GccValue y = gcc.dataStack.top();
   gcc.dataStack.pop();
   GccValue x = gcc.dataStack.top();
@@ -197,6 +198,7 @@ bool doJOIN(GccInterpreter& gcc, int* params) {
 }
 
 bool doLDF(GccInterpreter& gcc, int* params) {
+  gcc.gc.tryCollect();
   GccValue x = boost::intrusive_ptr<Closure>(new Closure(gcc.gc, params[0], gcc.env));
   gcc.dataStack.push(x);
   ++gcc.c;
@@ -204,6 +206,7 @@ bool doLDF(GccInterpreter& gcc, int* params) {
 }
 
 bool doAP(GccInterpreter& gcc, int* params) {
+  gcc.gc.tryCollect();
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
   // TODO check
@@ -235,10 +238,33 @@ bool doRTN(GccInterpreter& gcc, int* params) {
     return true;
   }
 }
-  /*
-  doDUM,
-  doRAP,
-  doSTOP,
+
+bool doDUM(GccInterpreter& gcc, int* params) {
+  gcc.gc.tryCollect();
+  const int n = params[0];
+  boost::intrusive_ptr<EnvFrame> fp = boost::intrusive_ptr<EnvFrame>(new EnvFrame(gcc.gc, n, gcc.env, true));
+  gcc.env = fp;
+  ++gcc.c;
+  return true;
+}
+
+bool doRAP(GccInterpreter& gcc, int* params) {
+  GccValue x = gcc.dataStack.top();
+  gcc.dataStack.pop();
+  // TODO check
+  boost::intrusive_ptr<Closure> cl = boost::get<boost::intrusive_ptr<Closure>, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x);
+  const int n = params[0];
+  // TODO check
+  for (int i = n-1; i > -1; --i) {
+    gcc.env->values[i] = gcc.dataStack.top();
+    gcc.dataStack.pop();
+  }
+  gcc.controlStack.push(ControlFrame(ControlFrame::RET, gcc.c+1, gcc.env->parent));
+  gcc.env->isDummy = false;
+  gcc.c = cl->addr;
+  return true;
+}
+/*  doSTOP,
   doTSEL,
   doTAP,
   doTRAP,
@@ -265,9 +291,9 @@ static const OperatorHandler operators[OPERATOR_COUNT] = {
   doLDF,
   doAP,
   doRTN,
- /* doDUM,
+  doDUM,
   doRAP,
-  doSTOP,
+/*  doSTOP,
   doTSEL,
   doTAP,
   doTRAP,
@@ -279,7 +305,9 @@ static const OperatorHandler operators[OPERATOR_COUNT] = {
 void GCBaseContainer::moveTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst) {
   if (isMoved)
     return;
-
+#ifdef TRACE_GC_MOVE
+  std::cout << "Move: " << this << std::endl;
+#endif
   if (prev)
     prev->next = next;
   else
@@ -300,23 +328,54 @@ void GCBaseContainer::moveTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFi
 
 void GC::collect() {
 #ifdef TRACE_GC
-  std::cout << "GC::collect started" << std::endl;
+  std::cout << "GC::collect started: init" << std::endl;
 #endif
   for (GCBaseContainer* p = first; p; p = p->next) {
     p->gcRefs = p->useCount();
     p->isMoved = false;
   }
+#ifdef TRACE_GC_STAGES
+  std::cout << "GC::collect: dec refs" << std::endl;
+#endif
   for (GCBaseContainer* p = first; p; p = p->next)
     p->decChildrenRefs();
-  GCBaseContainer* newFirst = NULL;
+#ifdef TRACE_GC_REFS
   for (GCBaseContainer* p = first; p; p = p->next)
-    if (p->gcRefs > 0)
-      p->moveTo(first, newFirst);
+    std::cout << "gcRefs(" << p << ") = " << p->gcRefs << std::endl;
+#endif
+#ifdef TRACE_GC_STAGES
+  std::cout << "GC::collect: move" << std::endl;
+#endif
+  GCBaseContainer* newFirst = NULL;
+  GCBaseContainer** pp = &first;
+  while (*pp) {
+    if ((*pp)->gcRefs > 0)
+      (*pp)->moveTo(first, newFirst); // updates pointer to next element at *pp
+    else
+      pp = &(*pp)->next;
+  }
+#ifdef TRACE_GC_STAGES
+  std::cout << "GC::collect: delete" << std::endl;
+#endif
   while (first)
     first->deref();
   first = newFirst;
 #ifdef TRACE_GC
   std::cout << "GC::collect finished" << std::endl;
+#endif
+}
+
+void GC::tryCollect() {
+#ifdef TRACE_GC
+    collect();
+#else
+    if (++objectCount > objectThreshold) {
+      collect();
+      if (objectCount > (2*objectThreshold)/3)
+        objectThreshold = (4*objectCount)/3;
+      else if (objectCount < 2*MIN_OBJECT_THRESHOLD/3)
+        objectThreshold = MIN_OBJECT_THRESHOLD;
+    }
 #endif
 }
 
@@ -326,13 +385,15 @@ public:
   }
     
   void operator()(const boost::intrusive_ptr<Cons>& x) const {
-    if (x)
+    if (x) {
       --x->gcRefs;
+    }
   }
   
   void operator()(const boost::intrusive_ptr<Closure>& x) const {
-    if (x)
+    if (x) {
       --x->gcRefs;
+    }
   }
 };
 
@@ -381,16 +442,24 @@ void Cons::moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst
 }
 
 void Cons::deref() {
-  boost::intrusive_ptr<Cons> self = this; // prevent circular deletion
-  boost::apply_visitor(DerefVisitor(), car);
-  boost::apply_visitor(DerefVisitor(), cdr);
+#ifdef TRACE_GC_DEREF
+  std::cout << "Cons::deref " << this << ": " << use_count() << std::endl;
+#endif
+  {
+    boost::intrusive_ptr<Cons> self = this; // prevent circular deletion
+    boost::apply_visitor(DerefVisitor(), car);
+    boost::apply_visitor(DerefVisitor(), cdr);
+  }
+#ifdef TRACE_GC_DEREF
+  std::cout << "Cons::after deref " << this << ": " << use_count() << std::endl;
+#endif
 }
 
 void EnvFrame::decChildrenRefs() {
   for(int i=0; i<values.size(); ++i)
     boost::apply_visitor(DecChildrenRefsVisitor(), values[i]);
   if (parent)
-    parent->decChildrenRefs();
+    --parent->gcRefs;
 }
 
 void EnvFrame::moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst) {
@@ -401,15 +470,23 @@ void EnvFrame::moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newF
 }
 
 void EnvFrame::deref() {
-  boost::intrusive_ptr<EnvFrame> self = this; // prevent circular deletion
-  for(int i=0; i<values.size(); ++i)
-    boost::apply_visitor(DerefVisitor(), values[i]);
-  parent.reset();
+#ifdef TRACE_GC_DEREF
+  std::cout << "EnvFrame::deref " << this << ": " << use_count() << std::endl;
+#endif
+  {
+    boost::intrusive_ptr<EnvFrame> self = this; // prevent circular deletion
+    for(int i=0; i<values.size(); ++i)
+      boost::apply_visitor(DerefVisitor(), values[i]);
+    parent.reset();
+  }
+#ifdef TRACE_GC_DEREF
+  std::cout << "EnvFrame::after deref " << this << ": " << use_count() << std::endl;
+#endif
 }
 
 void Closure::decChildrenRefs() {
   if (env)
-    env->decChildrenRefs();
+    --env->gcRefs;
 }
 
 void Closure::moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst) {
@@ -418,17 +495,34 @@ void Closure::moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFi
 }
 
 void Closure::deref() {
-  boost::intrusive_ptr<Closure> self = this; // prevent circular deletion
-  env.reset();
+#ifdef TRACE_GC_DEREF
+  std::cout << "Closure::deref " << this << ": " << use_count() << std::endl;
+#endif
+  {
+    boost::intrusive_ptr<Closure> self = this; // prevent circular deletion
+    env.reset();
+  }
+#ifdef TRACE_GC_DEREF
+  std::cout << "Closure::after deref " << this << ": " << use_count() << std::endl;
+#endif
 }
 
 GccInterpreter::GccInterpreter(const std::vector<Instruction>& programm): programm(programm) {
   c = 0;
 }
 
-void GccInterpreter::operator()() {
-  while ((*operators[programm[c].op])(*this, programm[c].params));
+bool GccInterpreter::step() {
+  return (*operators[programm[c].op])(*this, programm[c].params);
 }
+
+void GccInterpreter::operator()() {
+  while (step());
+}
+/*
+std::ostream& operator << (std::ostream&, const GccInterpreter& gcc) {
+  std::cout << c << ": " << programm[c] << std::endl;
+  std::cout 
+}*/
 
 GccValue GccInterpreter::runMain() {
   controlStack.push(ControlFrame(ControlFrame::STOP, 0, NULL));

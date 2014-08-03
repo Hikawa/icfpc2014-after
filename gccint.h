@@ -27,7 +27,11 @@
 #include <stack>
 #include <iostream>
 
-#define TRACE_GC
+// #define TRACE_GC
+// #define TRACE_GC_STAGES
+// #define TRACE_GC_DEREF
+// #define TRACE_GC_REFS
+// #define TRACE_GC_MOVE
 
 enum Operator {
   LDC,
@@ -80,6 +84,7 @@ class GC {
 public:
   GC() { first = NULL; objectCount = 0; objectThreshold = MIN_OBJECT_THRESHOLD; }
   void collect();
+  void tryCollect();
   
   GCBaseContainer* first;
   int objectCount;
@@ -90,18 +95,6 @@ public:
 class GCBaseContainer {
 public:
   GCBaseContainer(GC& gc): gc(gc) {
-#ifdef TRACE_GC
-    gc.collect();
-#else
-    if (++gc.objectCount > gc.objectThreshold) {
-      gc.collect(); // O_o
-      if (gc.objectCount > (2*gc.objectThreshold)/3)
-        gc.objectThreshold = (4*gc.objectCount)/3;
-      else if (gc.objectCount < 2*MIN_OBJECT_THRESHOLD/3)
-        gc.objectThreshold = MIN_OBJECT_THRESHOLD;
-    }
-#endif
-
     if (gc.first)
       gc.first->prev = this;
     next = gc.first;
@@ -236,7 +229,10 @@ struct GccInterpreter {
 public:
   GccInterpreter(const std::vector<Instruction>& programm);
   void operator()();
+  bool step();
   GccValue runMain();
+
+  // friend std::ostream& operator << (std::ostream&, const GccInterpreter& gcc);
   
   int c;
   std::stack<GccValue> dataStack;

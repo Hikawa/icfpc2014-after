@@ -17,15 +17,65 @@
 
 #include "gccint.h"
 
+/*
+0:  DUM 1
+1:  LDF factorial=5
+2:  LDF main=20
+3:  RAP 1
+4:  RTN
+factorial=5: ; (x)
+5:  LD 0 0 ; push x
+6:  LDC 1
+7:  CEQ
+8:  SEL one=10 notOne=12
+9:  RTN
+one=10:
+10:  LDC 1 ; return 1
+11: JOIN
+notOne=12:
+12: LD 0 0 ; push x
+13: LD 0 0
+14: LDC 1
+15: SUB ; push x-1
+16: LD 1 0 ; push factorial
+17: AP 1 ; push factorial(x-1)
+18: MUL ; push x*factorial(x-1)
+19: JOIN
+main=20:
+20: LDC 7
+21: LD 0 0 ; push factorial
+22: AP 1
+23: RTN
+*/
 int main() {
   std::vector<Instruction> prog;
-  prog.push_back(Instruction(LDC, 21));
-  prog.push_back(Instruction(LDF, 4));
-  prog.push_back(Instruction(AP, 1));
+  prog.push_back(Instruction(DUM, 1));
+  prog.push_back(Instruction(LDF, 5));
+  prog.push_back(Instruction(LDF, 20));
+  prog.push_back(Instruction(RAP, 1));
   prog.push_back(Instruction(RTN));
+// factorial=5: ; (x)
+  prog.push_back(Instruction(LD, 0, 0));
+  prog.push_back(Instruction(LDC, 1));
+  prog.push_back(Instruction(CEQ));
+  prog.push_back(Instruction(SEL, 10, 12));
+  prog.push_back(Instruction(RTN));
+// one=10:
+  prog.push_back(Instruction(LDC, 1));
+  prog.push_back(Instruction(JOIN));
+// notOne=12:
   prog.push_back(Instruction(LD, 0, 0));
   prog.push_back(Instruction(LD, 0, 0));
-  prog.push_back(Instruction(ADD));
+  prog.push_back(Instruction(LDC, 1));
+  prog.push_back(Instruction(SUB));
+  prog.push_back(Instruction(LD, 1, 0));
+  prog.push_back(Instruction(AP, 1));
+  prog.push_back(Instruction(MUL));
+  prog.push_back(Instruction(JOIN));
+// main=20:
+  prog.push_back(Instruction(LDC, 7));
+  prog.push_back(Instruction(LD, 0, 0));
+  prog.push_back(Instruction(AP, 1));
   prog.push_back(Instruction(RTN));
   GccInterpreter gcc(prog);
   std::cout << gcc.runMain() << std::endl;
