@@ -28,10 +28,10 @@ bool doLDC(GccInterpreter& gcc, int* params) {
 }
 
 bool doLD(GccInterpreter& gcc, int* params) {
-  EnvFrame* fp = gcc.env;
+  EnvFrame* fp = gcc.env.get();
   int n = params[0];
   while (n > 0) {
-    fp = fp->parent;
+    fp = fp->parent.get();
     --n;
   }
   // TODO check
@@ -45,8 +45,8 @@ bool doADD(GccInterpreter& gcc, int* params) {
   gcc.dataStack.pop();
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
-  GccValue z = boost::get<int, int, Cons*, Closure*>(x) +
-               boost::get<int, int, Cons*, Closure*>(y);
+  GccValue z = boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x) +
+               boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(y);
   gcc.dataStack.push(z);
   ++gcc.c;
   return true;
@@ -57,8 +57,8 @@ bool doSUB(GccInterpreter& gcc, int* params) {
   gcc.dataStack.pop();
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
-  GccValue z = boost::get<int, int, Cons*, Closure*>(x) -
-               boost::get<int, int, Cons*, Closure*>(y);
+  GccValue z = boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x) -
+               boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(y);
   gcc.dataStack.push(z);
   ++gcc.c;
   return true;
@@ -69,8 +69,8 @@ bool doMUL(GccInterpreter& gcc, int* params) {
   gcc.dataStack.pop();
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
-  GccValue z = boost::get<int, int, Cons*, Closure*>(x) *
-               boost::get<int, int, Cons*, Closure*>(y);
+  GccValue z = boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x) *
+               boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(y);
   gcc.dataStack.push(z);
   ++gcc.c;
   return true;
@@ -81,8 +81,8 @@ bool doDIV(GccInterpreter& gcc, int* params) {
   gcc.dataStack.pop();
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
-  GccValue z = boost::get<int, int, Cons*, Closure*>(x) /
-               boost::get<int, int, Cons*, Closure*>(y);
+  GccValue z = boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x) /
+               boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(y);
   gcc.dataStack.push(z);
   ++gcc.c;
   return true;
@@ -93,8 +93,8 @@ bool doCEQ(GccInterpreter& gcc, int* params) {
   gcc.dataStack.pop();
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
-  GccValue z = boost::get<int, int, Cons*, Closure*>(x) ==
-               boost::get<int, int, Cons*, Closure*>(y)? 1: 0;
+  GccValue z = boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x) ==
+               boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(y)? 1: 0;
   gcc.dataStack.push(z);
   ++gcc.c;
   return true;
@@ -105,8 +105,8 @@ bool doCGT(GccInterpreter& gcc, int* params) {
   gcc.dataStack.pop();
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
-  GccValue z = boost::get<int, int, Cons*, Closure*>(x) >
-               boost::get<int, int, Cons*, Closure*>(y)? 1: 0;
+  GccValue z = boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x) >
+               boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(y)? 1: 0;
   gcc.dataStack.push(z);
   ++gcc.c;
   return true;
@@ -117,8 +117,8 @@ bool doCGTE(GccInterpreter& gcc, int* params) {
   gcc.dataStack.pop();
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
-  GccValue z = boost::get<int, int, Cons*, Closure*>(x) >=
-               boost::get<int, int, Cons*, Closure*>(y)? 1: 0;
+  GccValue z = boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x) >=
+               boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(y)? 1: 0;
   gcc.dataStack.push(z);
   ++gcc.c;
   return true;
@@ -131,11 +131,11 @@ bool doATOM(GccInterpreter& gcc, int* params) {
         return 1;
     }
     
-    int operator()(Cons*) const {
+    int operator()(const boost::intrusive_ptr<Cons>&) const {
         return 0;
     }
     
-    int operator()(Closure*) const {
+    int operator()(const boost::intrusive_ptr<Closure>&) const {
         return 0;
     }
   };
@@ -152,7 +152,7 @@ bool doCONS(GccInterpreter& gcc, int* params) {
   gcc.dataStack.pop();
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
-  GccValue z = new Cons(x, y);
+  GccValue z = boost::intrusive_ptr<Cons>(new Cons(gcc.gc, x, y));
   gcc.dataStack.push(z);
   ++gcc.c;
   return true;
@@ -162,7 +162,7 @@ bool doCAR(GccInterpreter& gcc, int* params) {
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
   // TODO check
-  gcc.dataStack.push(boost::get<Cons*, int, Cons*, Closure*>(x)->car);
+  gcc.dataStack.push(boost::get<boost::intrusive_ptr<Cons>, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x)->car);
   ++gcc.c;
   return true;
 }
@@ -171,7 +171,7 @@ bool doCDR(GccInterpreter& gcc, int* params) {
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
   // TODO check
-  gcc.dataStack.push(boost::get<Cons*, int, Cons*, Closure*>(x)->cdr);
+  gcc.dataStack.push(boost::get<boost::intrusive_ptr<Cons>, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x)->cdr);
   ++gcc.c;
   return true;
 }
@@ -181,7 +181,7 @@ bool doSEL(GccInterpreter& gcc, int* params) {
   gcc.dataStack.pop();
   // TODO check
   gcc.controlStack.push(ControlFrame(ControlFrame::JOIN, gcc.c+1, gcc.env));
-  if (boost::get<int, int, Cons*, Closure*>(x) == 0)
+  if (boost::get<int, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x) == 0)
     gcc.c = params[1];
   else
     gcc.c = params[0];
@@ -197,7 +197,7 @@ bool doJOIN(GccInterpreter& gcc, int* params) {
 }
 
 bool doLDF(GccInterpreter& gcc, int* params) {
-  GccValue x = new Closure(params[0], gcc.env);
+  GccValue x = boost::intrusive_ptr<Closure>(new Closure(gcc.gc, params[0], gcc.env));
   gcc.dataStack.push(x);
   ++gcc.c;
   return true;
@@ -207,9 +207,9 @@ bool doAP(GccInterpreter& gcc, int* params) {
   GccValue x = gcc.dataStack.top();
   gcc.dataStack.pop();
   // TODO check
-  Closure* cl = boost::get<Closure*, int, Cons*, Closure*>(x);
+  boost::intrusive_ptr<Closure> cl = boost::get<boost::intrusive_ptr<Closure>, int, boost::intrusive_ptr<Cons>, boost::intrusive_ptr<Closure> >(x);
   const int n = params[0];
-  EnvFrame* fp = new EnvFrame(n, cl->env);
+  boost::intrusive_ptr<EnvFrame> fp = boost::intrusive_ptr<EnvFrame>(new EnvFrame(gcc.gc, n, cl->env));
   for (int i = n-1; i > -1; --i) {
     fp->values[i] = gcc.dataStack.top();
     gcc.dataStack.pop();
@@ -276,9 +276,154 @@ static const OperatorHandler operators[OPERATOR_COUNT] = {
   doBRK,*/
 };
 
+void GCBaseContainer::moveTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst) {
+  if (isMoved)
+    return;
+
+  if (prev)
+    prev->next = next;
+  else
+    oldFirst = next;
+  if (next)
+    next->prev = prev;
+      
+  if (newFirst)
+    newFirst->prev = this;
+  next = newFirst;
+  prev = NULL;
+  newFirst = this;
+  
+  isMoved = true;
+  
+  moveChildrenTo(oldFirst, newFirst);
+}
+
+void GC::collect() {
+#ifdef TRACE_GC
+  std::cout << "GC::collect started" << std::endl;
+#endif
+  for (GCBaseContainer* p = first; p; p = p->next) {
+    p->gcRefs = p->useCount();
+    p->isMoved = false;
+  }
+  for (GCBaseContainer* p = first; p; p = p->next)
+    p->decChildrenRefs();
+  GCBaseContainer* newFirst = NULL;
+  for (GCBaseContainer* p = first; p; p = p->next)
+    if (p->gcRefs > 0)
+      p->moveTo(first, newFirst);
+  while (first)
+    first->deref();
+  first = newFirst;
+#ifdef TRACE_GC
+  std::cout << "GC::collect finished" << std::endl;
+#endif
+}
+
+class DecChildrenRefsVisitor: public boost::static_visitor<void> {
+public:
+  void operator()(int) const {
+  }
+    
+  void operator()(const boost::intrusive_ptr<Cons>& x) const {
+    if (x)
+      --x->gcRefs;
+  }
+  
+  void operator()(const boost::intrusive_ptr<Closure>& x) const {
+    if (x)
+      --x->gcRefs;
+  }
+};
+
+class MoveChildrenToVisitor: public boost::static_visitor<void> {
+public:
+  MoveChildrenToVisitor(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst): oldFirst(oldFirst), newFirst(newFirst) {}
+  void operator()(int) const {
+  }
+    
+  void operator()(const boost::intrusive_ptr<Cons>& x) const {
+    if (x)
+      x->moveTo(oldFirst, newFirst);
+  }
+  
+  void operator()(const boost::intrusive_ptr<Closure>& x) const {
+    if (x)
+      x->moveTo(oldFirst, newFirst);
+  }
+  
+  GCBaseContainer* &oldFirst;
+  GCBaseContainer* &newFirst;
+};
+
+class DerefVisitor: public boost::static_visitor<void> {
+public:
+  void operator()(int) const {
+  }
+    
+  void operator()(boost::intrusive_ptr<Cons>& x) const {
+    x.reset();
+  }
+  
+  void operator()(boost::intrusive_ptr<Closure>& x) const {
+    x.reset();
+  }
+};
+
+void Cons::decChildrenRefs() {
+  boost::apply_visitor(DecChildrenRefsVisitor(), car);
+  boost::apply_visitor(DecChildrenRefsVisitor(), cdr);
+}
+
+void Cons::moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst) {
+  boost::apply_visitor(MoveChildrenToVisitor(oldFirst, newFirst), car);
+  boost::apply_visitor(MoveChildrenToVisitor(oldFirst, newFirst), cdr);
+}
+
+void Cons::deref() {
+  boost::intrusive_ptr<Cons> self = this; // prevent circular deletion
+  boost::apply_visitor(DerefVisitor(), car);
+  boost::apply_visitor(DerefVisitor(), cdr);
+}
+
+void EnvFrame::decChildrenRefs() {
+  for(int i=0; i<values.size(); ++i)
+    boost::apply_visitor(DecChildrenRefsVisitor(), values[i]);
+  if (parent)
+    parent->decChildrenRefs();
+}
+
+void EnvFrame::moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst) {
+  for(int i=0; i<values.size(); ++i)
+    boost::apply_visitor(MoveChildrenToVisitor(oldFirst, newFirst), values[i]);
+  if (parent)
+    parent->moveTo(oldFirst, newFirst);
+}
+
+void EnvFrame::deref() {
+  boost::intrusive_ptr<EnvFrame> self = this; // prevent circular deletion
+  for(int i=0; i<values.size(); ++i)
+    boost::apply_visitor(DerefVisitor(), values[i]);
+  parent.reset();
+}
+
+void Closure::decChildrenRefs() {
+  if (env)
+    env->decChildrenRefs();
+}
+
+void Closure::moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst) {
+  if (env)
+    env->moveTo(oldFirst, newFirst);
+}
+
+void Closure::deref() {
+  boost::intrusive_ptr<Closure> self = this; // prevent circular deletion
+  env.reset();
+}
+
 GccInterpreter::GccInterpreter(const std::vector<Instruction>& programm): programm(programm) {
   c = 0;
-  env = NULL;
 }
 
 void GccInterpreter::operator()() {

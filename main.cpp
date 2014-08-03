@@ -15,7 +15,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <iostream>
 #include "gccint.h"
 
 int main() {
@@ -30,4 +29,5 @@ int main() {
   prog.push_back(Instruction(RTN));
   GccInterpreter gcc(prog);
   std::cout << gcc.runMain() << std::endl;
+  gcc.gc.collect();
 }

@@ -19,10 +19,15 @@
 #define GCC_INT_H_INCLUDED
 
 #include <boost/variant.hpp>
+#include <boost/smart_ptr/intrusive_ptr.hpp>
+#include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include <utility>
 #include <string>
 #include <vector>
 #include <stack>
+#include <iostream>
+
+#define TRACE_GC
 
 enum Operator {
   LDC,
@@ -69,31 +74,149 @@ struct Instruction {
   std::string comment; 
 };
 
+class GCBaseContainer;
+
+class GC {
+public:
+  GC() { first = NULL; objectCount = 0; objectThreshold = MIN_OBJECT_THRESHOLD; }
+  void collect();
+  
+  GCBaseContainer* first;
+  int objectCount;
+  int objectThreshold;
+  static const int MIN_OBJECT_THRESHOLD = 1000;
+};
+
+class GCBaseContainer {
+public:
+  GCBaseContainer(GC& gc): gc(gc) {
+#ifdef TRACE_GC
+    gc.collect();
+#else
+    if (++gc.objectCount > gc.objectThreshold) {
+      gc.collect(); // O_o
+      if (gc.objectCount > (2*gc.objectThreshold)/3)
+        gc.objectThreshold = (4*gc.objectCount)/3;
+      else if (gc.objectCount < 2*MIN_OBJECT_THRESHOLD/3)
+        gc.objectThreshold = MIN_OBJECT_THRESHOLD;
+    }
+#endif
+
+    if (gc.first)
+      gc.first->prev = this;
+    next = gc.first;
+    prev = NULL;
+    gc.first = this;
+  }
+  
+  virtual ~GCBaseContainer() {
+    --gc.objectCount;
+    if (prev) {
+      prev->next = next;
+    }
+    else {
+      gc.first = next;
+    }
+    if (next)
+      next->prev = prev;
+  }
+  
+  void moveTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst);
+  
+  virtual unsigned int useCount() const = 0;
+  virtual void decChildrenRefs() = 0;
+  virtual void moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst) = 0;
+  virtual void deref() = 0;
+  
+  GCBaseContainer* next;
+  GCBaseContainer* prev;
+  int gcRefs;
+  bool isMoved;
+  GC& gc;
+};
+
+template <class DerivedT>
+class GCContainer: public boost::intrusive_ref_counter<DerivedT>, public GCBaseContainer {
+public:
+  GCContainer(GC& gc): GCBaseContainer(gc) {}
+  virtual unsigned int useCount() const { return boost::intrusive_ref_counter<DerivedT>::use_count(); }
+};
+
 struct Cons;
 
 struct Closure;
 
 typedef boost::variant<int,
-                       Cons*,
-                       Closure*> GccValue;
+                       boost::intrusive_ptr<Cons>,
+                       boost::intrusive_ptr<Closure> > GccValue;
 
-struct Cons {
-  Cons(const GccValue& car, const GccValue& cdr): car(car), cdr(cdr) {}
+struct Cons: GCContainer<Cons> {
+  Cons(GC& gc, const GccValue& car, const GccValue& cdr):  GCContainer(gc), car(car), cdr(cdr) {
+#ifdef TRACE_GC
+    std::cout << "new Cons() " << this << std::endl;
+#endif
+  }
+  
+#ifdef TRACE_GC
+  ~Cons() {
+    std::cout << "delete Cons " << this << std::endl;
+  }
+#endif
+  
+  virtual void decChildrenRefs();
+  virtual void moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst);
+  virtual void deref();
+  
   GccValue car;
   GccValue cdr;
 };
 
-struct EnvFrame {
-  EnvFrame(int n, EnvFrame* parent, bool isDummy = false): values(n), parent(parent), isDummy(isDummy) {}
+struct EnvFrame: GCContainer<EnvFrame> {
+  EnvFrame(GC& gc,
+           int n,
+           const boost::intrusive_ptr<EnvFrame>& parent,
+           bool isDummy = false)
+  : GCContainer(gc), values(n), parent(parent), isDummy(isDummy) {
+#ifdef TRACE_GC
+    std::cout << "new EnvFrame() " << this << std::endl;
+#endif
+  }
+
+#ifdef TRACE_GC
+  ~EnvFrame() {
+    std::cout << "delete EnvFrame " << this << std::endl;
+  }
+#endif
+
+  virtual void decChildrenRefs();
+  virtual void moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst);
+  virtual void deref();
+  
   bool isDummy;
   std::vector<GccValue> values;
-  EnvFrame* parent;
+  boost::intrusive_ptr<EnvFrame> parent;
 };
 
-struct Closure {
-  Closure(int addr, EnvFrame* env): addr(addr), env(env) {}
+struct Closure: GCContainer<Closure> {
+  Closure(GC& gc, int addr, const boost::intrusive_ptr<EnvFrame>& env)
+  : GCContainer(gc), addr(addr), env(env) {
+#ifdef TRACE_GC
+    std::cout << "new Closure() " << this << std::endl;
+#endif
+  }
+  
+#ifdef TRACE_GC
+  ~Closure() {
+    std::cout << "delete Closure " << this << std::endl;
+  }
+#endif
+  
+  virtual void decChildrenRefs();
+  virtual void moveChildrenTo(GCBaseContainer* &oldFirst, GCBaseContainer* &newFirst);
+  virtual void deref();
+  
   int addr;
-  EnvFrame* env;
+  boost::intrusive_ptr<EnvFrame> env;
 };
 
 struct ControlFrame {
@@ -103,9 +226,10 @@ struct ControlFrame {
     JOIN
   } tag;
   int addr;
-  EnvFrame* env;
+  boost::intrusive_ptr<EnvFrame> env;
   
-  ControlFrame(Tag tag, int addr, EnvFrame* env): tag(tag), addr(addr), env(env) {}
+  ControlFrame(Tag tag, int addr, const boost::intrusive_ptr<EnvFrame>& env)
+  : tag(tag), addr(addr), env(env) {}
 };
 
 struct GccInterpreter {
@@ -117,8 +241,9 @@ public:
   int c;
   std::stack<GccValue> dataStack;
   std::stack<ControlFrame> controlStack;
-  EnvFrame* env;
+  boost::intrusive_ptr<EnvFrame> env;
   std::vector<Instruction> programm;
+  GC gc;
 };
 
 #endif
